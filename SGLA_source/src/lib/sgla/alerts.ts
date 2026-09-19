@@ -50,7 +50,7 @@ export function deadlineText(date?: string | null): string {
 /* Estados derivados                                                    */
 /* ------------------------------------------------------------------ */
 
-export const CLOSED_PROCESS_STATUS = ["Deferido", "Indeferido", "Arquivado"];
+export const CLOSED_PROCESS_STATUS = ["Deferido", "Indeferido", "Arquivado", "Finalizado"];
 
 export const isProcessActive = (p: Process) => !CLOSED_PROCESS_STATUS.includes(p.status);
 
@@ -122,8 +122,7 @@ export function buildPendencies({
             : null;
 
     const stale =
-      p.status === "Em análise" &&
-      Date.now() - new Date(p.updated_at).getTime() > 60 * 86400000
+      p.status === "Em análise" && Date.now() - new Date(p.updated_at).getTime() > 60 * 86400000
         ? "Processo parado há mais de 60 dias"
         : null;
 
@@ -204,7 +203,8 @@ export function buildPendencies({
   }
 
   return out.sort(
-    (a, b) => LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level) ||
+    (a, b) =>
+      LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level) ||
       String(a.date ?? "9999").localeCompare(String(b.date ?? "9999")),
   );
 }

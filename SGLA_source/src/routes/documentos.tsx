@@ -64,6 +64,7 @@ function DocumentsPage() {
   const [status, setStatus] = useState<string>("Rascunho");
   const [documentType, setDocumentType] = useState<string>(DOCUMENT_TYPES[0]);
   const [checklistStatus, setChecklistStatus] = useState<string>("Pendente");
+  const [expiresAt, setExpiresAt] = useState("");
   const [clientId, setClientId] = useState<string>("");
   const [processId, setProcessId] = useState<string>("");
   const [aiBusy, setAiBusy] = useState(false);
@@ -96,6 +97,7 @@ function DocumentsPage() {
     setStatus("Rascunho");
     setDocumentType(DOCUMENT_TYPES[0]);
     setChecklistStatus("Pendente");
+    setExpiresAt("");
     const firstClient = clients.data?.[0]?.id ?? "";
     setClientId(firstClient);
     setProcessId(processes.data?.find((p) => p.client_id === firstClient)?.id ?? "");
@@ -119,6 +121,7 @@ function DocumentsPage() {
     setStatus(d.status);
     setDocumentType(d.document_type ?? "Outro");
     setChecklistStatus(d.checklist_status ?? "Pendente");
+    setExpiresAt(d.expires_at ?? "");
     setClientId(d.client_id ?? "");
     setProcessId(d.process_id ?? "");
     setOpenEditor(true);
@@ -136,6 +139,7 @@ function DocumentsPage() {
       status,
       document_type: documentType,
       checklist_status: checklistStatus,
+      expires_at: expiresAt || null,
       template_key: templateKey,
       client_id: clientId || null,
       process_id: processId || null,
@@ -345,6 +349,13 @@ function DocumentsPage() {
               value={checklistStatus}
               onChange={(e) => setChecklistStatus(e.target.value)}
               options={CHECKLIST_STATUS}
+            />
+            <Text
+              label="Data de validade"
+              type="date"
+              value={expiresAt}
+              onChange={(e) => setExpiresAt(e.target.value)}
+              hint="Preencha quando o documento tiver validade."
             />
             <Choice
               label="Empreendimento"

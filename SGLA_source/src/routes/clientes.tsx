@@ -1,6 +1,22 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { Building2, Loader2, Pencil, Phone, Plus, Search, Trash2 } from "lucide-react";
+import {
+  Building2,
+  CheckCircle2,
+  ClipboardCheck,
+  ExternalLink,
+  FileText,
+  FolderOpen,
+  Loader2,
+  MapPin,
+  MessageCircle,
+  Pencil,
+  Phone,
+  Plus,
+  Search,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -16,9 +32,24 @@ import {
 } from "@/components/sgla/primitives";
 import { consultarCnpj } from "@/lib/sgla/cnpj.functions";
 import { PROPOSAL_STATUS, REGISTRATION_STATUS } from "@/lib/sgla/constants";
-import { useClients, useDeleteRow, useSaveClient } from "@/lib/sgla/db";
-import { maskCnpj, stripCnpj, validCnpjShape } from "@/lib/sgla/format";
-import type { Client, ClientInsert } from "@/lib/sgla/types";
+import {
+  useClients,
+  useConditions,
+  useDeleteRow,
+  useDocuments,
+  useProcesses,
+  useSaveClient,
+} from "@/lib/sgla/db";
+import {
+  daysUntil,
+  fmtDate,
+  fmtDateTime,
+  maskCnpj,
+  stripCnpj,
+  validCnpjShape,
+} from "@/lib/sgla/format";
+import { TEMPLATES } from "@/lib/sgla/templates";
+import type { Client, ClientInsert, Process, SglaDocument } from "@/lib/sgla/types";
 
 export const Route = createFileRoute("/clientes")({
   head: () => ({
@@ -102,8 +133,118 @@ function dateValue(value: string) {
   return value ? `${value}T00:00:00.000Z` : null;
 }
 
+function FolderProcessList({ processes }: { processes: Process[]; licensesOnly?: boolean }) {
+  return processes.length ? (
+    <ul className="space-y-2.5">
+      {processes.map((process) => (
+        <li
+          key={process.id}
+          className="flex flex-col gap-3 rounded-xl border border-border bg-card/60 p-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{process.license_type}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {process.protocol || "Sem protocolo"} · {process.agency || "Órgão não informado"}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill
+              tone={
+                process.status === "Finalizado" || process.status === "Deferido"
+                  ? "success"
+                  : "info"
+              }
+            >
+              {process.status}
+            </Pill>
+            {process.expires_at ? (
+              <Pill
+                tone={
+                  daysUntil(process.expires_at) !== null && daysUntil(process.expires_at)! < 0
+                    ? "danger"
+                    : "neutral"
+                }
+              >
+                Validade: {fmtDate(process.expires_at)}
+              </Pill>
+            ) : null}
+          </div>
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <EmptyState
+      icon={ShieldCheck}
+      title="Nenhuma licença vinculada"
+      description="Os processos e licenças deste empreendimento aparecerão aqui."
+    />
+  );
+}
+
+function FolderDocumentList({
+  documents,
+  checklistOnly = false,
+}: {
+  documents: SglaDocument[];
+  checklistOnly?: boolean;
+}) {
+  return documents.length ? (
+    <ul className="space-y-2.5">
+      {documents.map((document) => {
+        const remainingDays = daysUntil(document.expires_at);
+        const expiryLabel =
+          remainingDays !== null && remainingDays < 0
+            ? "Vencido"
+            : remainingDays !== null && remainingDays <= 30
+              ? "Próximo do vencimento"
+              : null;
+        return (
+          <li
+            key={document.id}
+            className="flex flex-col gap-3 rounded-xl border border-border bg-card/60 p-4 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{document.title}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {document.document_type} · cadastrado em {fmtDateTime(document.created_at)}
+                {document.expires_at ? ` · validade ${fmtDate(document.expires_at)}` : ""}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {!checklistOnly && expiryLabel ? (
+                <Pill tone={expiryLabel === "Vencido" ? "danger" : "warning"}>{expiryLabel}</Pill>
+              ) : null}
+              <Pill tone={document.checklist_status === "Concluído" ? "success" : "warning"}>
+                {document.checklist_status ?? "Pendente"}
+              </Pill>
+              <Pill
+                tone={
+                  document.status === "Aprovado" || document.status === "Protocolado"
+                    ? "success"
+                    : "neutral"
+                }
+              >
+                {document.status}
+              </Pill>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  ) : (
+    <EmptyState
+      icon={checklistOnly ? ClipboardCheck : FileText}
+      title={checklistOnly ? "Checklist vazio" : "Nenhum documento vinculado"}
+      description="Cadastre documentos na tela de Documentos e associe-os a este empreendimento."
+    />
+  );
+}
+
 function ClientsPage() {
   const clients = useClients();
+  const processes = useProcesses();
+  const conditions = useConditions();
+  const documents = useDocuments();
   const save = useSaveClient();
   const del = useDeleteRow("clients", "Empreendimento");
   const lookup = useServerFn(consultarCnpj);
@@ -113,6 +254,17 @@ function ClientsPage() {
   const [editing, setEditing] = useState<Client | null>(null);
   const [form, setForm] = useState<ClientInsert>(emptyForm);
   const [busy, setBusy] = useState(false);
+  const [folderClient, setFolderClient] = useState<Client | null>(null);
+  const [folderTab, setFolderTab] = useState<
+    | "dados"
+    | "licencas"
+    | "documentos"
+    | "checklist"
+    | "condicionantes"
+    | "comunicacao"
+    | "propostas"
+    | "modelos"
+  >("dados");
 
   const set = <K extends keyof ClientInsert>(k: K, v: ClientInsert[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -138,6 +290,11 @@ function ClientsPage() {
     const { id: _id, user_id: _u, created_at: _c, updated_at: _up, ...rest } = c;
     setForm(rest as ClientInsert);
     setOpen(true);
+  };
+
+  const openFolder = (c: Client) => {
+    setFolderClient(c);
+    setFolderTab("dados");
   };
 
   const runLookup = async () => {
@@ -245,12 +402,12 @@ function ClientsPage() {
                 <dl className="mt-3 grid grid-cols-2 gap-2.5">
                   <Field label="CNPJ" value={c.cnpj ? maskCnpj(c.cnpj) : "—"} />
                   <Field label="Município" value={[c.city, c.uf].filter(Boolean).join("/")} />
-                  <Field label="CNAE" value={c.cnae} />
+                  <Field
+                    label="CNAE principal"
+                    value={[c.cnae, c.cnae_desc].filter(Boolean).join(" — ")}
+                  />
                   <Field label="Bairro" value={c.neighborhood || "—"} />
                 </dl>
-                {c.cnae_desc ? (
-                  <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{c.cnae_desc}</p>
-                ) : null}
                 {(c.street || c.address) && (
                   <p className="mt-1 line-clamp-1 text-[11px] text-muted-foreground">
                     {[c.street, c.number, c.neighborhood, c.zip_code].filter(Boolean).join(", ") ||
@@ -258,6 +415,9 @@ function ClientsPage() {
                   </p>
                 )}
                 <div className="mt-4 flex items-center gap-2">
+                  <Btn variant="gold" onClick={() => openFolder(c)} className="flex-1">
+                    <FolderOpen className="size-3.5" /> Abrir pasta
+                  </Btn>
                   <Btn variant="outline" onClick={() => openEdit(c)} className="flex-1">
                     <Pencil className="size-3.5" /> Editar
                   </Btn>
@@ -275,6 +435,275 @@ function ClientsPage() {
           </div>
         )}
       </Panel>
+
+      <Modal
+        open={Boolean(folderClient)}
+        onClose={() => setFolderClient(null)}
+        wide
+        title={folderClient ? `Pasta digital — ${folderClient.legal_name}` : "Pasta digital"}
+        description="Visão centralizada dos dados já cadastrados para este empreendimento."
+        footer={
+          <Btn variant="ghost" onClick={() => setFolderClient(null)}>
+            Fechar pasta
+          </Btn>
+        }
+      >
+        {folderClient ? (
+          <div>
+            <div className="mb-5 flex items-start gap-3 rounded-xl border border-primary/25 bg-primary/8 p-4">
+              <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-primary/30 bg-primary/12 text-primary">
+                <FolderOpen className="size-5" />
+              </span>
+              <div className="min-w-0">
+                <p className="font-display text-base font-semibold">{folderClient.legal_name}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {folderClient.trade_name || "Empreendimento"} ·{" "}
+                  {folderClient.cnpj ? maskCnpj(folderClient.cnpj) : "CNPJ não informado"}
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-5 flex gap-1.5 overflow-x-auto border-b border-border pb-2">
+              {(
+                [
+                  ["dados", "Dados do empreendimento"],
+                  ["licencas", "Licenças"],
+                  ["documentos", "Documentos"],
+                  ["checklist", "Checklist"],
+                  ["condicionantes", "Condicionantes"],
+                  ["comunicacao", "Comunicação"],
+                  ["propostas", "Propostas"],
+                  ["modelos", "Modelos para impressão"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setFolderTab(key)}
+                  className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                    folderTab === key
+                      ? "bg-primary/12 text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {folderTab === "dados" ? (
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Panel title="Identificação" className="p-4">
+                  <dl className="grid grid-cols-2 gap-3">
+                    <Field label="Razão social" value={folderClient.legal_name} />
+                    <Field label="Nome fantasia" value={folderClient.trade_name} />
+                    <Field
+                      label="CNPJ"
+                      value={folderClient.cnpj ? maskCnpj(folderClient.cnpj) : "—"}
+                    />
+                    <Field
+                      label="CNAE principal"
+                      value={[folderClient.cnae, folderClient.cnae_desc]
+                        .filter(Boolean)
+                        .join(" — ")}
+                    />
+                    <Field label="CNAEs secundários" value={folderClient.secondary_cnaes} />
+                    <Field label="Situação" value={folderClient.registration_status} />
+                  </dl>
+                </Panel>
+                <Panel title="Responsável e localização" className="p-4">
+                  <dl className="grid grid-cols-2 gap-3">
+                    <Field label="Responsável legal" value={folderClient.contact_name} />
+                    <Field label="Telefone celular" value={folderClient.contact_mobile} />
+                    <Field
+                      label="Endereço"
+                      value={
+                        [folderClient.street, folderClient.number, folderClient.complement]
+                          .filter(Boolean)
+                          .join(", ") || folderClient.address
+                      }
+                    />
+                    <Field label="Bairro" value={folderClient.neighborhood} />
+                    <Field label="CEP" value={folderClient.zip_code} />
+                    <Field
+                      label="Município/UF"
+                      value={[folderClient.city, folderClient.uf].filter(Boolean).join("/")}
+                    />
+                  </dl>
+                  {folderClient.map_url ? (
+                    <a
+                      href={folderClient.map_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-primary"
+                    >
+                      <MapPin className="size-3.5" /> Abrir localização{" "}
+                      <ExternalLink className="size-3" />
+                    </a>
+                  ) : null}
+                </Panel>
+                <Panel title="Dados físicos" className="p-4 sm:col-span-2">
+                  <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <Field
+                      label="Área total"
+                      value={
+                        folderClient.total_area != null ? `${folderClient.total_area} m²` : "—"
+                      }
+                    />
+                    <Field
+                      label="Área construída"
+                      value={
+                        folderClient.built_area != null ? `${folderClient.built_area} m²` : "—"
+                      }
+                    />
+                    <Field label="Latitude" value={folderClient.latitude} />
+                    <Field label="Longitude" value={folderClient.longitude} />
+                  </dl>
+                </Panel>
+              </div>
+            ) : null}
+
+            {folderTab === "licencas" ? (
+              <FolderProcessList
+                processes={(processes.data ?? []).filter((p) => p.client_id === folderClient.id)}
+                licensesOnly
+              />
+            ) : null}
+
+            {folderTab === "documentos" || folderTab === "checklist" ? (
+              <FolderDocumentList
+                documents={(documents.data ?? []).filter((d) => d.client_id === folderClient.id)}
+                checklistOnly={folderTab === "checklist"}
+              />
+            ) : null}
+
+            {folderTab === "condicionantes" ? (
+              <ul className="space-y-2.5">
+                {(conditions.data ?? [])
+                  .filter((c) => c.client_id === folderClient.id)
+                  .map((condition) => (
+                    <li
+                      key={condition.id}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card/60 p-3.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{condition.title}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {condition.due_date
+                            ? `Prazo: ${fmtDate(condition.due_date)}`
+                            : "Sem prazo definido"}
+                        </p>
+                      </div>
+                      <Pill tone={condition.done ? "success" : "warning"}>
+                        {condition.done ? "Concluída" : "Pendente"}
+                      </Pill>
+                    </li>
+                  ))}
+              </ul>
+            ) : null}
+
+            {folderTab === "comunicacao" ? (
+              <Panel title="Acompanhamento da comunicação" className="p-4">
+                <dl className="grid gap-4 sm:grid-cols-3">
+                  <Field
+                    label="E-mail enviado"
+                    value={
+                      folderClient.communication_email_sent_at
+                        ? fmtDateTime(folderClient.communication_email_sent_at)
+                        : "Não registrado"
+                    }
+                  />
+                  <Field
+                    label="Confirmação solicitada"
+                    value={
+                      folderClient.communication_receipt_requested_at
+                        ? fmtDateTime(folderClient.communication_receipt_requested_at)
+                        : "Não registrada"
+                    }
+                  />
+                  <Field
+                    label="Recebimento confirmado"
+                    value={
+                      folderClient.communication_receipt_confirmed_at
+                        ? fmtDateTime(folderClient.communication_receipt_confirmed_at)
+                        : "Não confirmado"
+                    }
+                  />
+                </dl>
+                {folderClient.communication_receipt_requested_at &&
+                !folderClient.communication_receipt_confirmed_at ? (
+                  <div className="mt-4 flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/8 p-3 text-xs text-warning">
+                    <Phone className="size-4" /> Ausência de confirmação: ligar para o cliente.
+                    {folderClient.contact_mobile ? (
+                      <a
+                        href={`tel:${folderClient.contact_mobile}`}
+                        className="font-semibold underline"
+                      >
+                        Ligar
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
+                {folderClient.communication_notes ? (
+                  <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+                    {folderClient.communication_notes}
+                  </p>
+                ) : null}
+              </Panel>
+            ) : null}
+
+            {folderTab === "propostas" ? (
+              <Panel title="Acompanhamento comercial" className="p-4">
+                <dl className="grid gap-4 sm:grid-cols-4">
+                  <Field label="Situação" value={folderClient.proposal_status} />
+                  <Field
+                    label="Enviada em"
+                    value={
+                      folderClient.proposal_sent_at
+                        ? fmtDate(folderClient.proposal_sent_at)
+                        : "Não registrada"
+                    }
+                  />
+                  <Field
+                    label="Aceita em"
+                    value={
+                      folderClient.proposal_accepted_at
+                        ? fmtDate(folderClient.proposal_accepted_at)
+                        : "Não registrada"
+                    }
+                  />
+                  <Field
+                    label="Acompanhamento"
+                    value={
+                      folderClient.proposal_follow_up_month
+                        ? fmtDate(folderClient.proposal_follow_up_month).slice(3)
+                        : "Não definido"
+                    }
+                  />
+                </dl>
+              </Panel>
+            ) : null}
+
+            {folderTab === "modelos" ? (
+              <ul className="grid gap-3 sm:grid-cols-2">
+                {TEMPLATES.map((template) => (
+                  <li key={template.key} className="rounded-xl border border-border bg-card/60 p-4">
+                    <div className="flex items-start gap-3">
+                      <FileText className="mt-0.5 size-4 shrink-0 text-primary" />
+                      <div>
+                        <p className="text-sm font-medium">{template.name}</p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          {template.description}
+                        </p>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         open={open}
